@@ -31,9 +31,15 @@ CLASS_NAMES = list(TARGET_MAP)
 Z_LIMIT = 4.0
 
 
-def load_real(path):
-    df = pd.read_csv(path)
+def load_real(path, include_curricular=False):
+    # The UCI file is semicolon-delimited with a BOM; the course variant is comma-delimited.
+    df = pd.read_csv(path, sep=None, engine="python", encoding="utf-8-sig")
+    df.columns = df.columns.str.strip()
     df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
+    if not include_curricular:
+        # The course variant has no semester-grade columns; dropping them keeps results
+        # comparable to the original notebook and models prediction at enrollment time.
+        df = df.loc[:, ~df.columns.str.startswith("Curricular units")]
     df = df.dropna(subset=["Target"])
     df["Target"] = df["Target"].map(TARGET_MAP)
     return df.dropna(subset=["Target"]).astype({"Target": int})
@@ -136,13 +142,15 @@ def cluster_analysis(X_train, y_train, out_dir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="academic_success_dataset.csv")
+    ap.add_argument("--include-curricular", action="store_true",
+                    help="keep 'Curricular units ...' semester columns (UCI file only)")
     ap.add_argument("--synthetic", action="store_true", help="use random data (smoke test)")
     ap.add_argument("--out", default="results")
     args = ap.parse_args()
 
     out_dir = Path(args.out)
     out_dir.mkdir(exist_ok=True)
-    df = load_synthetic() if args.synthetic else load_real(args.data)
+    df = load_synthetic() if args.synthetic else load_real(args.data, args.include_curricular)
     X_train, X_val, X_test, y_train, y_val, y_test = split(df)
     X_train, y_train, n_dropped = drop_train_outliers(X_train, y_train)
     print(f"train={len(X_train)} (dropped {n_dropped} outliers) val={len(X_val)} test={len(X_test)}")

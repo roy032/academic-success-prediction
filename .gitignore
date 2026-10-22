@@ -24,3 +24,4 @@ academic_success_dataset_preprocessed.csv
 # Script outputs
 results/
 academic_success_dataset.csv
+results_*/

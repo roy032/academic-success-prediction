@@ -20,19 +20,41 @@ Original notebook results (with leakage), test accuracy: Logistic Regression 0.6
 
 ## Results
 
-Run `python train.py --data academic_success_dataset.csv` and the table below is written to `results/results.md` (metrics in `results/metrics.json`, plots in `results/clustering.png`).
+Run on the public UCI *Predict Students' Dropout and Academic Success* file (4,424 students). **Caveat:** this is the clean UCI release, not the course variant used in the original notebook, which had roughly 10% of values randomly blanked out. The imputation step is therefore mostly a no-op on this data, and absolute numbers are not directly comparable to the notebook. By default the 'Curricular units' semester columns are dropped so the features match the notebook's 24 (enrollment-time information only).
 
-> Results from the real dataset have not been added yet; the dataset is not in this repository. Paste `results/results.md` here after running.
+**Enrollment-time features only (24 features, default):**
+
+| Model | Val acc | Val macro-F1 | Test acc | Test macro-F1 |
+|---|---|---|---|---|
+| Logistic Regression | 0.621 | 0.465 | 0.614 | 0.447 |
+| Logistic Regression (balanced) | 0.558 | 0.520 | 0.516 | 0.486 |
+| Naive Bayes | 0.564 | 0.480 | 0.559 | 0.460 |
+| Neural Network (MLP) | 0.609 | 0.444 | 0.621 | 0.461 |
+
+**With semester performance (`--include-curricular`):**
+
+| Model | Val acc | Val macro-F1 | Test acc | Test macro-F1 |
+|---|---|---|---|---|
+| Logistic Regression | 0.743 | 0.643 | 0.758 | 0.672 |
+| Logistic Regression (balanced) | 0.730 | 0.679 | 0.721 | 0.680 |
+| Naive Bayes | 0.671 | 0.623 | 0.634 | 0.581 |
+| Neural Network (MLP) | 0.754 | 0.657 | 0.732 | 0.653 |
+
+Takeaways:
+- At enrollment time the *Enrolled* class is essentially unpredictable: the plain models reach about 0.6 accuracy by almost never predicting it (F1 of 0.02 to 0.06). Class balancing trades accuracy for a much better macro-F1 (0.486 vs 0.447), which is why models are selected on macro-F1.
+- Adding first and second semester results lifts the best test macro-F1 from 0.49 to 0.68, so early-warning use needs those features.
+- Results are from a single split with seed 42; differences of a few points between models are within noise.
 
 ## Run it
 
 ```bash
 pip install -r requirements.txt
 python train.py --data academic_success_dataset.csv   # real data
+python train.py --data data.csv --include-curricular  # UCI file with semester columns
 python train.py --synthetic                           # smoke test, random data
 ```
 
-The dataset (`academic_success_dataset.csv`) is not included. It is a version of the UCI "Predict Students' Dropout and Academic Success" data with some values removed. Place it next to `train.py`.
+The dataset is not included. Download the UCI "Predict Students' Dropout and Academic Success" data (https://archive.ics.uci.edu/dataset/697) and pass its CSV with `--data`; both the semicolon-delimited UCI file and the comma-delimited course variant are accepted.
 
 ## Project structure
 
