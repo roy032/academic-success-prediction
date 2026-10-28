@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "academic-success"
+version = "1.0.0"
+description = "Leakage-free pipeline that predicts student dropout, enrollment, or graduation."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "scikit-learn>=1.5",
+    "joblib>=1.3",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+serve = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.5"]
+notebook = ["jupyter>=1.0", "seaborn>=0.13", "scipy>=1.11"]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.5", "httpx>=0.27", "academic-success[serve]"]
+
+[project.scripts]
+asp = "academic_success.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "NPY", "PD"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::sklearn.exceptions.ConvergenceWarning"]

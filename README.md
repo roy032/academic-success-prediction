@@ -1,66 +1,130 @@
 # Academic Success Prediction
 
-Predicts whether a student will **drop out, stay enrolled, or graduate** from enrollment, socio-economic and macro-economic features (4,424 students, 24 features). Compares three classifiers and a clustering analysis.
+[![CI](https://github.com/roy032/academic-success-prediction/actions/workflows/ci.yml/badge.svg)](https://github.com/roy032/academic-success-prediction/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
+![Coverage](https://img.shields.io/badge/coverage-98%25-brightgreen)
+![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230)
 
-## Pipeline (`train.py`)
+Predicts whether a student will **drop out, stay enrolled, or graduate**, from information available at enrollment (demographics, prior education, finances, macro-economics). The project is a tested Python package with a reproducible training pipeline, cross-validated model selection, uncertainty estimates on test metrics, an HTTP inference API and a Docker image.
 
-1. **Split first**: stratified 64 / 16 / 20 train / validation / test.
-2. **Fit on train only**: median imputation, z-score outlier removal (|z| > 4, training rows only) and standardization are fit on the training split and applied unchanged to validation and test. Nothing sees the test set before the final evaluation.
-3. **Models**: Logistic Regression (plain and class-balanced), Gaussian Naive Bayes, MLP (128, 64) with early stopping.
-4. **Model selection** by validation macro-F1; test metrics are reported once.
-5. **Clustering**: KMeans on train features with elbow and silhouette analysis, PCA visualization, and a cluster-vs-target crosstab.
+```
+asp train  ──►  artifacts/{model.joblib, metrics.json, results.md, figures/}  ──►  asp serve / docker run
+```
 
-Accuracy alone is misleading here: the *Enrolled* class is small (about 18%) and hard to separate, so the script reports macro-F1 and per-class F1 as well.
+## Quick start
 
-## Why `train.py` replaces the notebook's pipeline
+```bash
+pip install -e ".[dev]"     # or: make install
+make test                   # 34 tests, ~30 s
+asp train                   # synthetic data with the UCI schema, no download needed
+asp train --data data.csv   # the real UCI file
+asp serve                   # http://127.0.0.1:8000/docs
+```
 
-The original notebook (`academic_success_prediction.ipynb`) imputed, removed outliers and standardized the **whole dataset before splitting**, so test-set statistics leaked into training. It also removed outlier rows from the test set. `train.py` fixes both. The notebook is kept for its EDA and as a record of the first pass; its modeling numbers should not be compared with `train.py` output.
+Docker (trains during the build, then serves):
 
-Original notebook results (with leakage), test accuracy: Logistic Regression 0.636; Naive Bayes 0.258; both with near-zero recall on *Enrolled*.
+```bash
+docker build -t academic-success .                                   # synthetic data
+docker build --build-arg DATA=data.csv -t academic-success .         # real data in the build context
+docker run -p 8000:8000 academic-success
+curl -X POST localhost:8000/predict -H 'Content-Type: application/json' \
+     -d '{"students": [{"Marital status": 1, "Course": 9500, "...": "..."}]}'
+```
+
+## Data
+
+The UCI [Predict Students' Dropout and Academic Success](https://archive.ics.uci.edu/dataset/697) dataset: 4,424 students, 36 features, three classes (32% Dropout, 18% Enrolled, 50% Graduate). It is not redistributed in this repository. Both the semicolon-delimited UCI file and the comma-delimited course variant used in the original notebook are accepted.
+
+So the pipeline, tests and CI run without the file, `academic_success.data.make_synthetic` generates students with the same columns, code values and class balance, with outcomes driven by a known latent risk score. **All numbers on this page that are not explicitly labelled "real data" come from synthetic data** and validate the engineering, not the science.
+
+By default the 12 `Curricular units ...` semester columns are dropped, so the model uses only enrollment-time information (24 features). `--include-curricular` keeps them.
+
+## Methodology
+
+| Step | What | Why |
+|---|---|---|
+| Split | Stratified 80/20 development/test split, made before anything is fit | The test set is used exactly once, at the end |
+| Preprocessing | Median imputation + standardisation for numeric columns; mode imputation + one-hot encoding for the 9 integer-coded nominal columns (`Course`, `Application mode`, ...) | Codes such as `Course=9500` have no order; treating them as numbers (as the notebook did) is a modelling error. Rare codes are grouped and unseen codes are handled at inference |
+| Outliers | Rows with \|z\| > 4 on the 7 continuous columns are dropped from **training folds only** | z-scores on category codes or binary flags are meaningless; evaluation rows are never dropped |
+| Leakage control | Every fitted step lives inside one scikit-learn `Pipeline` that is re-fit inside each CV fold | No validation or test statistics reach training |
+| Model selection | 5-fold stratified CV macro-F1 on the development set | A single validation split was within noise between models; CV gives mean ± sd |
+| Metric | Macro-F1 (plus accuracy, balanced accuracy, one-vs-rest ROC-AUC, log loss) | *Enrolled* is a minority class; accuracy rewards ignoring it |
+| Uncertainty | 1,000-sample bootstrap 95% CI on test accuracy and macro-F1 | Single-number test scores hide ±3 points of noise at n=885 |
+| Explainability | Permutation importance on the test set, scored by macro-F1 | Model-agnostic, works for the whole pipeline |
+| Unsupervised | KMeans (k = 2..8) with elbow and silhouette, PCA view, cluster-vs-outcome crosstab | Kept from the original analysis |
+
+Models compared: logistic regression (plain and class-balanced), Gaussian naive Bayes, an MLP (128, 64), and class-balanced histogram gradient boosting.
 
 ## Results
 
-Run on the public UCI *Predict Students' Dropout and Academic Success* file (4,424 students). **Caveat:** this is the clean UCI release, not the course variant used in the original notebook, which had roughly 10% of values randomly blanked out. The imputation step is therefore mostly a no-op on this data, and absolute numbers are not directly comparable to the notebook. By default the 'Curricular units' semester columns are dropped so the features match the notebook's 24 (enrollment-time information only).
+### Synthetic data (reproduced by CI on every push)
 
-**Enrollment-time features only (24 features, default):**
-
-| Model | Val acc | Val macro-F1 | Test acc | Test macro-F1 |
+| Model | CV macro-F1 (5-fold) | Test acc | Test macro-F1 | Test ROC-AUC |
 |---|---|---|---|---|
-| Logistic Regression | 0.621 | 0.465 | 0.614 | 0.447 |
-| Logistic Regression (balanced) | 0.558 | 0.520 | 0.516 | 0.486 |
-| Naive Bayes | 0.564 | 0.480 | 0.559 | 0.460 |
-| Neural Network (MLP) | 0.609 | 0.444 | 0.621 | 0.461 |
+| **Logistic Regression (balanced)** (selected) | 0.491 ± 0.018 | 0.528 | 0.485 | 0.692 |
+| Gradient Boosting (balanced) | 0.490 ± 0.022 | 0.534 | 0.480 | 0.700 |
+| Logistic Regression | 0.444 ± 0.014 | 0.614 | 0.449 | 0.693 |
+| Neural Network (MLP) | 0.432 ± 0.012 | 0.603 | 0.434 | 0.709 |
+| Gaussian Naive Bayes | 0.139 ± 0.008 | 0.195 | 0.140 | 0.608 |
 
-**With semester performance (`--include-curricular`):**
+Selected model test macro-F1 95% bootstrap CI: [0.455, 0.516]. Permutation importance recovers the drivers the generator actually uses (tuition status, scholarship, admission grade, age, debtor, gender), which is a useful end-to-end correctness check.
 
-| Model | Val acc | Val macro-F1 | Test acc | Test macro-F1 |
-|---|---|---|---|---|
-| Logistic Regression | 0.743 | 0.643 | 0.758 | 0.672 |
-| Logistic Regression (balanced) | 0.730 | 0.679 | 0.721 | 0.680 |
-| Naive Bayes | 0.671 | 0.623 | 0.634 | 0.581 |
-| Neural Network (MLP) | 0.754 | 0.657 | 0.732 | 0.653 |
+| | |
+|---|---|
+| ![Model comparison](docs/figures/model_comparison.png) | ![Confusion matrix](docs/figures/confusion_matrix.png) |
+| ![ROC curves](docs/figures/roc_curves.png) | ![Permutation importance](docs/figures/permutation_importance.png) |
 
-Takeaways:
-- At enrollment time the *Enrolled* class is essentially unpredictable: the plain models reach about 0.6 accuracy by almost never predicting it (F1 of 0.02 to 0.06). Class balancing trades accuracy for a much better macro-F1 (0.486 vs 0.447), which is why models are selected on macro-F1.
-- Adding first and second semester results lifts the best test macro-F1 from 0.49 to 0.68, so early-warning use needs those features.
-- Results are from a single split with seed 42; differences of a few points between models are within noise.
+![Clustering](docs/figures/clustering.png)
 
-## Run it
+### Real data (earlier leakage-free script, single validation split)
 
-```bash
-pip install -r requirements.txt
-python train.py --data academic_success_dataset.csv   # real data
-python train.py --data data.csv --include-curricular  # UCI file with semester columns
-python train.py --synthetic                           # smoke test, random data
-```
+Measured on the UCI file with the previous `train.py` (numeric treatment of category codes, single 64/16/20 split). Re-run `asp train --data <file>` to get the current pipeline's numbers with CV and confidence intervals.
 
-The dataset is not included. Download the UCI "Predict Students' Dropout and Academic Success" data (https://archive.ics.uci.edu/dataset/697) and pass its CSV with `--data`; both the semicolon-delimited UCI file and the comma-delimited course variant are accepted.
+| Features | Best model | Test acc | Test macro-F1 |
+|---|---|---|---|
+| Enrollment-time (24) | Logistic Regression (balanced) | 0.516 | 0.486 |
+| + semester results (36) | Logistic Regression (balanced) | 0.721 | 0.680 |
+
+Takeaways: at enrollment time *Enrolled* is barely predictable, and plain models reach ~0.6 accuracy by almost never predicting it. Class balancing trades accuracy for macro-F1, which is why selection uses macro-F1. Adding first-year results lifts macro-F1 to ~0.68, so an early-warning system should re-score students after their first semester.
+
+The original notebook (`notebooks/01_eda_and_first_pass.ipynb`) scaled and removed outliers on the full dataset before splitting, so its numbers (test accuracy 0.636 for logistic regression) are optimistic and not comparable.
+
+## Inference API
+
+| Endpoint | Description |
+|---|---|
+| `GET /health` | Liveness, selected model, training timestamp |
+| `GET /schema` | Expected feature names and class labels |
+| `POST /predict` | Batch of up to 1,000 students → predicted class + class probabilities for each |
+
+Missing values (`null`) are imputed by the pipeline. Missing *columns* return HTTP 422 with the names of the absent features. Interactive docs are served at `/docs`.
+
+Batch scoring without a server: `asp predict students.csv --model artifacts/model.joblib` (one JSON line per row).
+
+## Engineering
+
+- **Package**: `src/` layout, `pyproject.toml`, `asp` console script, type hints throughout.
+- **Tests**: 34 pytest tests at 98% line coverage, covering schema handling, a leakage check on the preprocessor, outlier logic, every model, CV and bootstrap maths, determinism (two runs with the same seed are identical), a beat-the-baseline check, the API (happy path and validation errors) and the CLI.
+- **CI** (`.github/workflows/ci.yml`): ruff lint + format check; tests on Python 3.10, 3.11, 3.12 with a 90% coverage floor; a training run whose results table is posted to the job summary and whose artifacts are uploaded; a Docker build plus a live smoke test of the container.
+- **Reproducibility**: every random step is seeded; `model.joblib` stores the fitted pipeline with its feature list, config, library versions and training time.
+- **Container**: multi-stage build, no training data in the final image, non-root user, health check.
+- **Hygiene**: pre-commit (ruff, nbstripout, large-file guard), `Makefile`, `.gitignore` that keeps data out of git.
+- **Model card**: [`docs/MODEL_CARD.md`](docs/MODEL_CARD.md) covers intended use, limitations and fairness considerations.
 
 ## Project structure
 
 ```
-├── README.md
-├── requirements.txt
-├── train.py                           # leakage-free pipeline, writes results/
-└── academic_success_prediction.ipynb  # original EDA + first-pass models
+├── src/academic_success/
+│   ├── data.py        # loading, schema, synthetic generator
+│   ├── pipeline.py    # preprocessing + model registry, outlier filter
+│   ├── evaluate.py    # metrics, cross-validation, bootstrap CIs
+│   ├── train.py       # end-to-end training and artifact writing
+│   ├── plots.py       # figures
+│   ├── predict.py     # Predictor: load bundle, validate input, score
+│   ├── serve.py       # FastAPI app
+│   └── cli.py         # `asp train | predict | serve`
+├── tests/             # pytest suite
+├── notebooks/         # original EDA + first-pass notebook
+├── docs/              # model card, figures
+├── Dockerfile, Makefile, pyproject.toml, .github/workflows/ci.yml
 ```

@@ -1,27 +1,26 @@
-# Byte-compiled / optimized
+# Byte-compiled / build
 __pycache__/
 *.py[cod]
-*$py.class
+*.egg-info/
+build/
+dist/
 
-# Jupyter Notebook checkpoints
+# Tooling
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
 .ipynb_checkpoints/
 
-# OS files
+# OS / IDE
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# IDE
 .vscode/
 .idea/
 
-# Generated data splits
-academic_success_train.csv
-academic_success_val.csv
-academic_success_test.csv
-academic_success_dataset_preprocessed.csv
-
-# Script outputs
+# Data and generated outputs (the dataset is not redistributed)
+*.csv
+artifacts/
 results/
-academic_success_dataset.csv
-results_*/
